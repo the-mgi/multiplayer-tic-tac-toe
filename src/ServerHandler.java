@@ -31,9 +31,10 @@ public class ServerHandler {
                         new Thread((serverSession)).start();
                         break;
                     } else if (operation == Operation.JOIN_SESSION) {
+                        String string = (String) objectInputStream.readObject();
                         Person person = (Person) objectInputStream.readObject();
-                        if (serverSessions.containsKey(person.getUuid())) {  // either the key the server sent is right or wrong!!
-                            serverSessions.get(person.getUuid()).addStreams(objectInputStream, objectOutputStream, person.getName());
+                        if (serverSessions.containsKey(string)) {  // either the key the server sent is right or wrong!!
+                            serverSessions.get(string).addStreams(objectInputStream, objectOutputStream, person);
                             break;
                         } else {
                             objectOutputStream.writeObject(Operation.JOIN_SESSION_FAILED);
@@ -59,26 +60,24 @@ class ServerSession implements Runnable {
 
     private final ArrayList<ObjectOutputStream> objectOutputStreams = new ArrayList<>();
     private final ArrayList<ObjectInputStream> objectInputStreams = new ArrayList<>();
-    private final ArrayList<String> names = new ArrayList<>();
+    private final ArrayList<Person> people = new ArrayList<>();
 
     public ServerSession(ObjectInputStream objectInputStream, ObjectOutputStream objectOutputStream, CreateSessionData createSessionData) {
         this.objectInputStreams.add(objectInputStream);
         this.objectOutputStreams.add(objectOutputStream);
-        this.names.add(createSessionData.getPerson().getName());
+        this.people.add(createSessionData.getPerson());
 
         this.currentCount += 1;
 
         this.createSessionData = createSessionData;
     }
 
-    public void addStreams(ObjectInputStream objectInputStream, ObjectOutputStream objectOutputStream, String name) {
+    public void addStreams(ObjectInputStream objectInputStream, ObjectOutputStream objectOutputStream, Person person) {
         if (this.currentCount < this.createSessionData.getNumberOfPlayersAllowed()) {
-            System.out.println("before size: " + this.objectOutputStreams.size());
             this.objectOutputStreams.add(objectOutputStream);
             this.objectInputStreams.add(objectInputStream);
             this.sendObject(Operation.JOIN_SESSION_SUCCESS, this.objectOutputStreams.get(this.currentCount));
-            System.out.println("after size size: " + this.objectOutputStreams.size());
-            this.names.add(name);
+            this.people.add(person);
             if (this.currentCount == (this.createSessionData.getNumberOfPlayersAllowed() - 1)) {
                 this.sendAllPlayersNamesSymbols();
             }
@@ -89,14 +88,19 @@ class ServerSession implements Runnable {
     }
 
     private void sendAllPlayersNamesSymbols() {
-        System.out.println("started sending!");
         Operation[] shapes = new Operation[]
                 {Operation.RECTANGLE, Operation.TICK, Operation.LINE, Operation.POLYGON, Operation.CIRCLE};
-        for (int i = 0; i < this.objectOutputStreams.size(); i++) {
-            Object[] data = new Object[]{shapes[i], names.get(i)};
-            this.sendObject(data, this.objectOutputStreams.get(i));
-            System.out.println(this.objectOutputStreams.size());
-            System.out.println("i am sending");
+        ArrayList<Object> finalArray = new ArrayList<>();
+        for (int i = 0; i < this.createSessionData.getNumberOfPlayersAllowed(); i++) {
+            Object[] data = new Object[]{shapes[i], people.get(i)};
+            finalArray.add(data);
+        }
+        this.sendObjectToAll(finalArray);
+    }
+
+    private void sendObjectToAll(Object object) {
+        for (int i = 0; i < this.createSessionData.getNumberOfPlayersAllowed(); i++) {
+            this.sendObject(object, this.objectOutputStreams.get(i));
         }
     }
 

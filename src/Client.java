@@ -1,5 +1,5 @@
 import javafx.application.Application;
-import javafx.beans.property.SimpleBooleanProperty;
+import javafx.application.Platform;
 import javafx.beans.property.SimpleStringProperty;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
@@ -22,29 +22,29 @@ import java.io.IOException;
 import java.io.ObjectInputStream;
 import java.io.ObjectOutputStream;
 import java.net.Socket;
-import java.util.Objects;
+import java.util.ArrayList;
+import java.util.UUID;
 
 import static utility.UtilityMethods.showError;
 
 public class Client extends Application {
     private Stage stage;
+    private GridPane playersNameSymbolAllottedGridPane;
 
     private static final String BACKGROUND_COLOR_BUTTON_DEFAULT_TIC = "#5465f8";
     private static final String BACKGROUND_COLOR_BUTTON_HOVER_TIC = "#6272fa";
     private static final String STYLESHEET_PATH = "./stylesheets/styles.css";
 
-    private final SimpleBooleanProperty disableAllButtons = new SimpleBooleanProperty(false);
-    private final SimpleStringProperty userConnectionStatus = new SimpleStringProperty("Both players must be connected!");
+    private final SimpleStringProperty userConnectionStatus = new SimpleStringProperty("Waiting for players...");
 
-    private final SimpleStringProperty userFullName = new SimpleStringProperty("");
-    private final SimpleStringProperty topField = new SimpleStringProperty("2");
+    private final SimpleStringProperty userFullName = new SimpleStringProperty("");  // nice
+    private final SimpleStringProperty topField = new SimpleStringProperty();
     private final SimpleStringProperty selectedDropdown = new SimpleStringProperty();
+    private final SimpleStringProperty lobbyStatus = new SimpleStringProperty("Currently room is empty");
 
-    private Node mySymbol;  // symbol for user to which he will be identified
+    private Operation myNodeSymbol;  // symbol for user to which he will be identified
 
     private Operation selectedStartOperation = null;
-
-    private String[] availableOpenSessions = new String[5];
 
     private ClientHandler clientHandler;
     private Socket socket;
@@ -53,26 +53,25 @@ public class Client extends Application {
 
     // Want to play among three players or MORE, change this NUMBER_OF_ROWS to the next ODD number AND
     // in ServerHandler change the NUMBER_OF_PLAYERS to the actual NUMBER_OF_PLAYERS
-    private static final int NUMBER_OF_ROWS = 3;
+    private static int NUMBER_OF_ROWS = 3;
 
     @Override
     public void start(Stage stage) {
-//        new Thread(() -> {
-//            try {
-//                socket = new Socket("localhost", 8080);
-//            } catch (IOException e) {
-//                showError("Exception Occurred in ClientJeopardy start method: " + e.toString());
-//            }
-//            clientHandler = new ClientHandler(socket);
-//        }).start();
+        new Thread(() -> {
+            try {
+                socket = new Socket("localhost", 8080);
+            } catch (IOException e) {
+                showError("Exception Occurred in ClientJeopardy start method: " + e.toString());
+            }
+            clientHandler = new ClientHandler(socket);
+        }).start();
 
         this.stage = stage;
 
-//        Scene scene = changeScene();
-//        stage.setScene(scene);
-//        stage.setTitle("Tic-Tac-Toe Multiplayer");
-//        stage.setResizable(false);
-        changeScene();
+        Scene scene = getCompleteScene();
+        stage.setScene(scene);
+        stage.setTitle("Tic-Tac-Toe Multiplayer");
+        stage.setResizable(false);
         stage.show();
     }
 
@@ -119,7 +118,7 @@ public class Client extends Application {
                     "Enter Session ID",
                     "Select From Available Sessions",
                     new String[]{"2", "3", "4", "5"},
-                    true
+                    false
             );
             borderPane.setCenter(mainCreateVBox);
         });
@@ -132,9 +131,9 @@ public class Client extends Application {
 
         Button ok = getButton("Ok", 80, 80);
         ok.setOnAction(e -> {
-            String userFullNameValue = userFullName.get();
+            String userFullNameValue = userFullName.getValue();
             String topFieldValue = topField.getValue();
-            String selectedDropdownValue = selectedDropdown.get();
+            String selectedDropdownValue = selectedDropdown.getValue();
             if (userFullNameValue.isEmpty() || topFieldValue.isEmpty()) {
                 showError("Fields must not be empty!");
                 return;
@@ -147,16 +146,16 @@ public class Client extends Application {
             }
             boolean condition = false;
             if (this.selectedStartOperation == Operation.CREATE_SESSION) {
-                String uuid = this.clientHandler.initiateSession();
-                System.out.println("UUID of created Session: " + uuid);
-                if (!uuid.isEmpty()) {
+                this.sessionId = this.clientHandler.initiateSession();
+                if (!this.clientHandler.initiateSession().isEmpty()) {
                     changeScene();
                     condition = true;
                 } else {
                     showError("Session Cannot be connected!");
                 }
             } else if (this.selectedStartOperation == Operation.JOIN_SESSION) {
-                Operation operation = this.clientHandler.joinSession();
+                this.sessionId = UUID.randomUUID().toString();
+                Operation operation = this.clientHandler.joinSession(this.sessionId);
                 if (operation == Operation.JOIN_SESSION_SUCCESS) {
                     changeScene();
                     condition = true;
@@ -168,9 +167,32 @@ public class Client extends Application {
             }
             if (condition) {
                 new Thread(() -> {
-                    Object[] o = this.clientHandler.startListeningOrders();
-                    for (int i = 0; i < Objects.requireNonNull(o).length; i++) {
-                        System.out.println(o[i]);
+                    Platform.runLater(() -> lobbyStatus.set("Players with Symbols"));
+                    ArrayList<Object> list = this.clientHandler.startListeningOrders();
+                    if (list != null) {
+                        for (int i = 0; i < list.size(); i++) {
+                            Object[] array = (Object[]) list.get(i);
+                            Operation operation = (Operation) array[0];
+                            System.out.println(operation);
+                            Person person = (Person) array[1];
+                            Node node = switch (operation) {
+                                case RECTANGLE -> getRectangle(Color.BLACK);
+                                case TICK -> getTick(Color.BLACK);
+                                case LINE -> getLine(Color.BLACK);
+                                case POLYGON -> getPolygon(Color.BLACK);
+                                default -> getCircle(Color.BLACK);
+                            };
+                            if (person.getUuid().equalsIgnoreCase(this.sessionId)) {
+                                System.out.println("passed!");
+                                this.myNodeSymbol = operation;
+                            }
+                            int finalI = i;
+                            Platform.runLater(() -> {
+                                HBox box = boxRight(person.getName(), node);
+                                playersNameSymbolAllottedGridPane.add(box, 0, finalI);
+
+                            });
+                        }
                     }
                 }).start();
             }
@@ -196,33 +218,38 @@ public class Client extends Application {
         numberOfRowsBox.setPadding(new Insets(10));
         numberOfRowsBox.setSpacing(30);
         Label rowsLabel = getLabel(textLabelTop);
-        ComboBox<String> comboBoxO = getStringComboBox(new String[]{"3", "4", "5"});
-        topField.bind(comboBoxO.valueProperty());
-        numberOfRowsBox.getChildren().addAll(rowsLabel, comboBoxO);
+
+        numberOfRowsBox.getChildren().add(rowsLabel);
 
         HBox playersAllowed = new HBox();
         playersAllowed.setSpacing(30);
         playersAllowed.setPadding(new Insets(10));
         playersAllowed.setAlignment(Pos.CENTER);
         Label numberOfPlayers = getLabel(textLabelBottom);
-        ComboBox<String> comboBox = getStringComboBox(comboBoxValues);
+        ComboBox<String> comboBox = getStringComboBox(comboBoxValues, selectedDropdown);
         playersAllowed.getChildren().addAll(numberOfPlayers, comboBox);
 
+        Node node;
         if (wants) {
+            node = getStringComboBox(new String[]{"3", "4", "5"}, topField);
             mainCreateVBox.getChildren().addAll(numberOfRowsBox, playersAllowed);
         } else {
+            TextField textField = getTextField(placeholderText, 100, 40);
+            topField.bind(textField.textProperty());
+            node = textField;
             mainCreateVBox.getChildren().addAll(numberOfRowsBox);
         }
+        numberOfRowsBox.getChildren().add(node);
         return mainCreateVBox;
     }
 
-    private ComboBox<String> getStringComboBox(String[] args) {
+    private ComboBox<String> getStringComboBox(String[] args, SimpleStringProperty simpleStringProperty) {
         ComboBox<String> comboBox = new ComboBox<>();
         for (String str : args) {
             comboBox.getItems().add(str);
         }
         comboBox.setValue(args[0]);
-        selectedDropdown.bind(comboBox.valueProperty());
+        simpleStringProperty.bind(comboBox.valueProperty());
         this.adjustWidthHeight(comboBox, 100, 40);
         return comboBox;
     }
@@ -241,6 +268,8 @@ public class Client extends Application {
 
     private Button getButton(String text, int width, int height) {
         Button button = new Button(text);
+        button.getStylesheets().add(STYLESHEET_PATH);
+        button.getStyleClass().addAll("button", "add-radius");
         this.adjustWidthHeight(button, width, height);
         return button;
     }
@@ -259,26 +288,29 @@ public class Client extends Application {
     }
 
     private void changeScene() {
-        stage.setTitle("Tic-Tac-Toe, Client: " + userFullName.get() + sessionId);
+        stage.setTitle("Tic-Tac-Toe, Client: " + userFullName.get());
         stage.setResizable(true);
         stage.setScene(new Scene(getGridPane()));
         stage.show();
     }
 
-    private GridPane getGridPane() {
+    private BorderPane getGridPane() {
+        BorderPane borderPane = new BorderPane();
+        borderPane.setPadding(new Insets(50));
+
         GridPane gridPane = new GridPane();
-        gridPane.setPadding(new Insets(30));
 
         HBox hBoxZero = new HBox();
+        hBoxZero.setAlignment(Pos.CENTER);
+        hBoxZero.setPadding(new Insets(10));
         Label label = new Label();
         label.setTextFill(Color.RED);
-        label.textProperty().bind(userConnectionStatus);
+        label.textProperty().bindBidirectional(userConnectionStatus);
         label.getStylesheets().add(STYLESHEET_PATH);
         label.getStyleClass().add("font-size");
-        hBoxZero.getChildren().add(label);
-        hBoxZero.setAlignment(Pos.CENTER);
 
-        gridPane.add(hBoxZero, 0, 1);
+        hBoxZero.getChildren().add(label);
+        borderPane.setTop(hBoxZero);
 
         for (int i = 0; i < Client.NUMBER_OF_ROWS; i++) {
             HBox hBox = new HBox();
@@ -286,12 +318,47 @@ public class Client extends Application {
             hBox.setPadding(new Insets(5));
             for (int j = 0; j < Client.NUMBER_OF_ROWS; j++) {
                 Button button = buttonWithProps(i, j);
-                button.setGraphic(getPolygon());
                 hBox.getChildren().add(button);
             }
-            gridPane.add(hBox, 0, i + 2);
+            gridPane.add(hBox, 0, i);
         }
-        return gridPane;
+
+        borderPane.setCenter(gridPane);
+
+        GridPane rightGridPane = new GridPane();
+        rightGridPane.getStylesheets().add(STYLESHEET_PATH);
+        rightGridPane.getStyleClass().addAll("right-side", "add-radius");
+        rightGridPane.setPadding(new Insets(20));
+        rightGridPane.setVgap(10);
+        playersNameSymbolAllottedGridPane = rightGridPane;
+
+        Label noUsers = getLabel("");
+        noUsers.textProperty().bindBidirectional(lobbyStatus);
+        noUsers.setTextFill(Color.WHITE);
+
+        HBox hBox = new HBox();
+        hBox.getChildren().add(noUsers);
+        hBox.setAlignment(Pos.CENTER);
+        hBox.setMinWidth(250);
+
+        rightGridPane.add(hBox, 0, 0);
+        borderPane.setRight(rightGridPane);
+        return borderPane;
+    }
+
+    private HBox boxRight(String playerName, Node node) {
+        HBox hBox = new HBox();
+        hBox.setAlignment(Pos.CENTER);
+        hBox.setPadding(new Insets(8));
+        hBox.setSpacing(10);
+        hBox.getStylesheets().add(STYLESHEET_PATH);
+        hBox.getStyleClass().addAll("hBox-right", "add-radius");
+
+        Label image = new Label();
+        image.setGraphic(node);
+        Label name = getLabel(playerName);
+        hBox.getChildren().addAll(image, name);
+        return hBox;
     }
 
     /**
@@ -305,10 +372,17 @@ public class Client extends Application {
     private Button buttonWithProps(int i, int j) {
         Button button = getButton("", 150, 150);
         button.setId(i + "-" + j);
-        button.disableProperty().bind(disableAllButtons);
+//        button.disableProperty().bindBidirectional(disableAllButtons);
+        button.setDisable(false);
         this.adjustProps(button);
         button.setOnAction(e -> {
-
+            button.setGraphic(switch (this.myNodeSymbol) {
+                case RECTANGLE -> getRectangle(Color.WHITE);
+                case TICK -> getTick(Color.WHITE);
+                case LINE -> getLine(Color.WHITE);
+                case POLYGON -> getPolygon(Color.WHITE);
+                default -> getCircle(Color.WHITE);
+            });
         });
         return button;
     }
@@ -325,48 +399,48 @@ public class Client extends Application {
         button.setOnMouseExited(e -> button.setStyle("-fx-background-color: " + BACKGROUND_COLOR_BUTTON_DEFAULT_TIC + ";"));
     }
 
-    private Node getCircle() {
+    private Node getCircle(Color color) {
         Circle circle = new Circle();
         circle.setRadius(30);
-        circle.setStroke(Color.WHITE);
+        circle.setStroke(color);
         circle.setFill(Color.rgb(200, 200, 200, 0.0));
         circle.setStrokeWidth(4);
         return circle;
     }
 
-    private Region getTick() {
+    private Region getTick(Color color) {
         Region region = new Region();
         region.setMaxWidth(40);
         region.setMaxHeight(20);
         region.setPrefHeight(10);
         region.setRotate(-45);
-        region.setStyle("" +
-                "-fx-border-width: 0 0 4 4;" +
-                "-fx-border-color: white;" +
-                "-fx-background-color: transparent;");
+        region.getStylesheets().add(STYLESHEET_PATH);
+        region.getStyleClass().add("region");
         return region;
     }
 
-    private Rectangle getRectangle() {
+    private Rectangle getRectangle(Color color) {
         Rectangle rectangle = new Rectangle(50, 50);
-        rectangle.setStroke(Color.WHITE);
+        rectangle.setStroke(color);
         rectangle.setFill(Color.rgb(200, 200, 200, 0.0));
         rectangle.setStrokeWidth(4);
+        rectangle.setArcHeight(10);
+        rectangle.setArcWidth(10);
         return rectangle;
     }
 
-    private Line getLine() {
+    private Line getLine(Color color) {
         Line line = new Line(0, 0, 50, 0);
-        line.setStroke(Color.WHITE);
+        line.setStroke(color);
         line.setStrokeWidth(4);
         return line;
     }
 
-    private Polygon getPolygon() {
+    private Polygon getPolygon(Color color) {
         Polygon parallelogram = new Polygon();
         parallelogram.getPoints().addAll(30.0, 0.0, 130.0, 0.0, 100.00, 50.0, 0.0, 50.0);
         parallelogram.setFill(Color.TRANSPARENT);
-        parallelogram.setStroke(Color.WHITE);
+        parallelogram.setStroke(color);
         parallelogram.setStrokeWidth(4);
         return parallelogram;
     }
@@ -402,14 +476,15 @@ class ClientHandler {
         this.sendObject(Operation.CREATE_SESSION);
         CreateSessionData data = new CreateSessionData(this.username, Operation.CREATE_SESSION, this.selectedValue, Integer.parseInt(this.topField));
         this.sendObject(data);
+        System.out.println(data.getPerson().getUuid());
         return data.getPerson().getUuid();
     }
 
-    public Operation joinSession() throws ClassCastException {
+    public Operation joinSession(String id) throws ClassCastException {
         this.sendObject(Operation.JOIN_SESSION);
-        Person person = new Person(this.username, this.topField);
+        this.sendObject(this.topField);
+        Person person = new Person(this.username, id);
         this.sendObject(person);
-        System.out.println("hello!");
         return (Operation) this.readObject();
     }
 
@@ -441,9 +516,16 @@ class ClientHandler {
         }
     }
 
-    public Object[] startListeningOrders() {
-        Object[] data = (Object[]) this.readObject();
-        assert data != null;
-        return data;
+    public ArrayList<Object> startListeningOrders() {
+        try {
+            ArrayList<Object> data = (ArrayList<Object>) this.objectInputStream.readObject();
+            if (data == null) {
+                showError("");
+            }
+            return data;
+        } catch (IOException | ClassNotFoundException | ClassCastException ex) {
+            showError("Error Occurred in startListeningOrders in ClientHandler: " + ex.toString());
+            return null;
+        }
     }
 }
