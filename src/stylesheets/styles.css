@@ -1,0 +1,10 @@
+.button {
+    -fx-border-radius: 5px;
+    -fx-background-radius: 5px;
+    -fx-text-fill: white;
+}
+
+.font-size {
+    -fx-font-size: 18px;
+}
+
