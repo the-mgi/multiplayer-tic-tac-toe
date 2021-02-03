@@ -1,5 +1,6 @@
 import javafx.application.Application;
 import javafx.application.Platform;
+import javafx.beans.property.SimpleBooleanProperty;
 import javafx.beans.property.SimpleStringProperty;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
@@ -7,6 +8,9 @@ import javafx.scene.Cursor;
 import javafx.scene.Node;
 import javafx.scene.Scene;
 import javafx.scene.control.*;
+import javafx.scene.control.Button;
+import javafx.scene.control.Label;
+import javafx.scene.control.TextField;
 import javafx.scene.layout.*;
 import javafx.scene.paint.Color;
 import javafx.scene.shape.Circle;
@@ -18,42 +22,38 @@ import utility.CreateSessionData;
 import utility.Operation;
 import utility.Person;
 
+import java.awt.*;
 import java.io.IOException;
 import java.io.ObjectInputStream;
 import java.io.ObjectOutputStream;
 import java.net.Socket;
 import java.util.ArrayList;
+import java.util.Objects;
 import java.util.UUID;
 
 import static utility.UtilityMethods.showError;
 
 public class Client extends Application {
     private Stage stage;
+    private Scene scene;
     private GridPane playersNameSymbolAllottedGridPane;
 
+    private String sessionId;
+    private int NUMBER_OF_ROWS = 3;
     private static final String BACKGROUND_COLOR_BUTTON_DEFAULT_TIC = "#5465f8";
     private static final String BACKGROUND_COLOR_BUTTON_HOVER_TIC = "#6272fa";
     private static final String STYLESHEET_PATH = "./stylesheets/styles.css";
 
     private final SimpleStringProperty userConnectionStatus = new SimpleStringProperty("Waiting for players...");
-
-    private final SimpleStringProperty userFullName = new SimpleStringProperty("");  // nice
+    private final SimpleStringProperty userFullName = new SimpleStringProperty("");
     private final SimpleStringProperty topField = new SimpleStringProperty();
     private final SimpleStringProperty selectedDropdown = new SimpleStringProperty();
     private final SimpleStringProperty lobbyStatus = new SimpleStringProperty("Currently room is empty");
-
-    private Operation myNodeSymbol;  // symbol for user to which he will be identified
-
-    private Operation selectedStartOperation = null;
+    private final SimpleBooleanProperty disableAllButtons = new SimpleBooleanProperty(true);
 
     private ClientHandler clientHandler;
     private Socket socket;
-
-    private String sessionId;
-
-    // Want to play among three players or MORE, change this NUMBER_OF_ROWS to the next ODD number AND
-    // in ServerHandler change the NUMBER_OF_PLAYERS to the actual NUMBER_OF_PLAYERS
-    private static int NUMBER_OF_ROWS = 3;
+    private Operation selectedStartOperation = null;
 
     @Override
     public void start(Stage stage) {
@@ -68,7 +68,7 @@ public class Client extends Application {
 
         this.stage = stage;
 
-        Scene scene = getCompleteScene();
+        this.scene = getCompleteScene();
         stage.setScene(scene);
         stage.setTitle("Tic-Tac-Toe Multiplayer");
         stage.setResizable(false);
@@ -147,7 +147,8 @@ public class Client extends Application {
             boolean condition = false;
             if (this.selectedStartOperation == Operation.CREATE_SESSION) {
                 this.sessionId = this.clientHandler.initiateSession();
-                if (!this.clientHandler.initiateSession().isEmpty()) {
+                if (!this.sessionId.isEmpty()) {
+                    NUMBER_OF_ROWS = Integer.parseInt(this.topField.getValue());
                     changeScene();
                     condition = true;
                 } else {
@@ -155,8 +156,11 @@ public class Client extends Application {
                 }
             } else if (this.selectedStartOperation == Operation.JOIN_SESSION) {
                 this.sessionId = UUID.randomUUID().toString();
-                Operation operation = this.clientHandler.joinSession(this.sessionId);
+                Object[] array = this.clientHandler.joinSession(this.sessionId);
+                Operation operation = (Operation) array[0];
+                int numberOfRows = (int) array[1];
                 if (operation == Operation.JOIN_SESSION_SUCCESS) {
+                    this.NUMBER_OF_ROWS = numberOfRows;
                     changeScene();
                     condition = true;
                 } else if (operation == Operation.JOIN_SESSION_FAILED) {
@@ -167,33 +171,29 @@ public class Client extends Application {
             }
             if (condition) {
                 new Thread(() -> {
-                    Platform.runLater(() -> lobbyStatus.set("Players with Symbols"));
                     ArrayList<Object> list = this.clientHandler.startListeningOrders();
                     if (list != null) {
                         for (int i = 0; i < list.size(); i++) {
                             Object[] array = (Object[]) list.get(i);
-                            Operation operation = (Operation) array[0];
-                            System.out.println(operation);
+                            Operation operation = (Operation) array[0];  // refers to the shape of node of the current player
                             Person person = (Person) array[1];
                             Node node = switch (operation) {
                                 case RECTANGLE -> getRectangle(Color.BLACK);
-                                case TICK -> getTick(Color.BLACK);
+                                case TICK -> getTick();
                                 case LINE -> getLine(Color.BLACK);
                                 case POLYGON -> getPolygon(Color.BLACK);
                                 default -> getCircle(Color.BLACK);
                             };
-                            if (person.getUuid().equalsIgnoreCase(this.sessionId)) {
-                                System.out.println("passed!");
-                                this.myNodeSymbol = operation;
-                            }
                             int finalI = i;
                             Platform.runLater(() -> {
+                                lobbyStatus.set("Players with Symbols");
                                 HBox box = boxRight(person.getName(), node);
                                 playersNameSymbolAllottedGridPane.add(box, 0, finalI);
 
                             });
                         }
                     }
+                    this.mainFunctionality();
                 }).start();
             }
         });
@@ -206,6 +206,23 @@ public class Client extends Application {
         borderPane.setBottom(okButtonBox);
 
         return new Scene(borderPane, 800, 800);
+    }
+
+    private void addGraphic() {
+        Object[] array = this.clientHandler.readMove();
+        Node node = getNodeGraphic((Operation) array[0]);
+        Button button = (Button) this.scene.lookup("#" + ((String) (array[1])));
+        Platform.runLater(() -> button.setGraphic(node));
+    }
+
+    private void mainFunctionality() {
+        while (true) {
+            boolean isIAmAllowed = this.clientHandler.receivePermission();
+            if (isIAmAllowed) {
+                this.disableAllButtons.set(false);
+            }
+            this.addGraphic();
+        }
     }
 
     private VBox createSessionORJoinVBox(String textLabelTop, String placeholderText, String textLabelBottom, String[] comboBoxValues, boolean wants) {
@@ -290,13 +307,14 @@ public class Client extends Application {
     private void changeScene() {
         stage.setTitle("Tic-Tac-Toe, Client: " + userFullName.get());
         stage.setResizable(true);
-        stage.setScene(new Scene(getGridPane()));
+        this.scene = new Scene(getGridPane());
+        stage.setScene(this.scene);
         stage.show();
     }
 
     private BorderPane getGridPane() {
         BorderPane borderPane = new BorderPane();
-        borderPane.setPadding(new Insets(50));
+        borderPane.setPadding(new Insets(20));
 
         GridPane gridPane = new GridPane();
 
@@ -312,11 +330,11 @@ public class Client extends Application {
         hBoxZero.getChildren().add(label);
         borderPane.setTop(hBoxZero);
 
-        for (int i = 0; i < Client.NUMBER_OF_ROWS; i++) {
+        for (int i = 0; i < this.NUMBER_OF_ROWS; i++) {
             HBox hBox = new HBox();
             hBox.setSpacing(10);
             hBox.setPadding(new Insets(5));
-            for (int j = 0; j < Client.NUMBER_OF_ROWS; j++) {
+            for (int j = 0; j < this.NUMBER_OF_ROWS; j++) {
                 Button button = buttonWithProps(i, j);
                 hBox.getChildren().add(button);
             }
@@ -370,21 +388,41 @@ public class Client extends Application {
      * @see #adjustProps
      */
     private Button buttonWithProps(int i, int j) {
-        Button button = getButton("", 150, 150);
+        int hW = (int) (
+                (Toolkit.getDefaultToolkit().getScreenSize().getHeight()) -
+                        (200) -
+                        (this.NUMBER_OF_ROWS * 5)) / NUMBER_OF_ROWS;
+        Button button = getButton("", hW, hW);
         button.setId(i + "-" + j);
-//        button.disableProperty().bindBidirectional(disableAllButtons);
-        button.setDisable(false);
+        button.disableProperty().bind(disableAllButtons);
         this.adjustProps(button);
         button.setOnAction(e -> {
-            button.setGraphic(switch (this.myNodeSymbol) {
-                case RECTANGLE -> getRectangle(Color.WHITE);
-                case TICK -> getTick(Color.WHITE);
-                case LINE -> getLine(Color.WHITE);
-                case POLYGON -> getPolygon(Color.WHITE);
-                default -> getCircle(Color.WHITE);
-            });
+            if (button.getGraphic() == null) {
+                disableAllButtons.set(true);
+                this.clientHandler.sendMyMove(button.getId());
+            }
         });
         return button;
+    }
+
+    private Node getNodeGraphic(Operation myNodeSymbol) {
+        switch (myNodeSymbol) {
+            case RECTANGLE -> {
+                return getRectangle(Color.WHITE);
+            }
+            case TICK -> {
+                return getTick();
+            }
+            case LINE -> {
+                return getLine(Color.WHITE);
+            }
+            case POLYGON -> {
+                return getPolygon(Color.WHITE);
+            }
+            default -> {
+                return getCircle(Color.WHITE);
+            }
+        }
     }
 
     /**
@@ -408,7 +446,7 @@ public class Client extends Application {
         return circle;
     }
 
-    private Region getTick(Color color) {
+    private Region getTick() {
         Region region = new Region();
         region.setMaxWidth(40);
         region.setMaxHeight(20);
@@ -480,12 +518,12 @@ class ClientHandler {
         return data.getPerson().getUuid();
     }
 
-    public Operation joinSession(String id) throws ClassCastException {
+    public Object[] joinSession(String id) throws ClassCastException {
         this.sendObject(Operation.JOIN_SESSION);
         this.sendObject(this.topField);
         Person person = new Person(this.username, id);
         this.sendObject(person);
-        return (Operation) this.readObject();
+        return (Object[]) this.readObject();
     }
 
     private void sendObject(Object object) {
@@ -527,5 +565,17 @@ class ClientHandler {
             showError("Error Occurred in startListeningOrders in ClientHandler: " + ex.toString());
             return null;
         }
+    }
+
+    public boolean receivePermission() {
+        return (boolean) Objects.requireNonNull(this.readObject());
+    }
+
+    public void sendMyMove(String buttonId) {
+        this.sendObject(buttonId);
+    }
+
+    public Object[] readMove() {
+        return (Object[]) this.readObject();
     }
 }
