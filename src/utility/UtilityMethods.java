@@ -16,7 +16,7 @@ public class UtilityMethods {
     public static void showError(String errorStatement) {
         Platform.runLater(() -> {
             Alert alert = new Alert(Alert.AlertType.ERROR);
-            if (errorStatement.equals("")) {
+            if (errorStatement.equals("") || errorStatement.contains("SocketException")) {
                 alert.getDialogPane().setContent(getLabel("Server Not Running"));
                 alert.showAndWait();
                 Platform.exit();
