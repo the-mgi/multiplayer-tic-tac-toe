@@ -7,11 +7,11 @@
 }
 
 .text-fill-red {
-    -fx-text-fill: #53f853;
+    -fx-text-fill: red;
 }
 
 .text-fill-green {
-    -fx-text-fill: lightgreen;
+    -fx-text-fill: #0c990c;
 }
 
 .right-side {
