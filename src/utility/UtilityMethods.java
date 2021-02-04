@@ -31,7 +31,8 @@ public class UtilityMethods {
         Platform.runLater(() -> {
             Alert alert = new Alert(Alert.AlertType.CONFIRMATION);
             alert.getDialogPane().setContent(getLabel(confirmationStatement));
-            alert.show();
+            alert.showAndWait();
+            Platform.exit();
         });
     }
 }
