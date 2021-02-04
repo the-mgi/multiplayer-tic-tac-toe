@@ -7,10 +7,10 @@ import javafx.geometry.Pos;
 import javafx.scene.Cursor;
 import javafx.scene.Node;
 import javafx.scene.Scene;
-import javafx.scene.control.*;
 import javafx.scene.control.Button;
 import javafx.scene.control.Label;
 import javafx.scene.control.TextField;
+import javafx.scene.control.*;
 import javafx.scene.layout.*;
 import javafx.scene.paint.Color;
 import javafx.scene.shape.Circle;
@@ -31,12 +31,14 @@ import java.util.ArrayList;
 import java.util.Objects;
 import java.util.UUID;
 
+import static utility.UtilityMethods.showConfirmation;
 import static utility.UtilityMethods.showError;
 
 public class Client extends Application {
     private Stage stage;
     private Scene scene;
     private GridPane playersNameSymbolAllottedGridPane;
+    private Label label;
 
     private String sessionId;
     private int NUMBER_OF_ROWS = 3;
@@ -95,6 +97,29 @@ public class Client extends Application {
         vBox.setPadding(new Insets(30));
         vBox.setSpacing(50);
 
+        Button createSession = getButtonCreateSession(borderPane);
+        Button joinSession = getButtonJoinSession(borderPane);
+        this.maxWidth(joinSession, 200, 200);
+        this.adjustProps(joinSession);
+
+        vBox.getChildren().addAll(createSession, joinSession);
+        mainVBox.getChildren().add(vBox);
+        borderPane.setLeft(mainVBox);
+
+        Button ok = getButton("Ok", 80, 80);
+        addOkayForwardFlow(ok);
+        this.adjustProps(ok);
+
+        VBox okButtonBox = new VBox();
+        okButtonBox.setAlignment(Pos.BOTTOM_RIGHT);
+        okButtonBox.setPadding(new Insets(30));
+        okButtonBox.getChildren().add(ok);
+        borderPane.setBottom(okButtonBox);
+
+        return new Scene(borderPane, 800, 800);
+    }
+
+    private Button getButtonCreateSession(BorderPane borderPane) {
         Button createSession = getButton("Create Session", 200, 200);
         this.maxWidth(createSession, 200, 200);
         this.adjustProps(createSession);
@@ -110,26 +135,10 @@ public class Client extends Application {
             );
             borderPane.setCenter(mainCreateVBox);
         });
-        Button joinSession = getButton("Join Session", 200, 200);
-        joinSession.setOnAction(e -> {
-            this.selectedStartOperation = Operation.JOIN_SESSION;
-            VBox mainCreateVBox = createSessionORJoinVBox(
-                    "Session ID",
-                    "Enter Session ID",
-                    "Select From Available Sessions",
-                    new String[]{"2", "3", "4", "5"},
-                    false
-            );
-            borderPane.setCenter(mainCreateVBox);
-        });
-        this.maxWidth(joinSession, 200, 200);
-        this.adjustProps(joinSession);
+        return createSession;
+    }
 
-        vBox.getChildren().addAll(createSession, joinSession);
-        mainVBox.getChildren().add(vBox);
-        borderPane.setLeft(mainVBox);
-
-        Button ok = getButton("Ok", 80, 80);
+    private void addOkayForwardFlow(Button ok) {
         ok.setOnAction(e -> {
             String userFullNameValue = userFullName.getValue();
             String topFieldValue = topField.getValue();
@@ -146,13 +155,17 @@ public class Client extends Application {
             }
             boolean condition = false;
             if (this.selectedStartOperation == Operation.CREATE_SESSION) {
-                this.sessionId = this.clientHandler.initiateSession();
-                if (!this.sessionId.isEmpty()) {
-                    NUMBER_OF_ROWS = Integer.parseInt(this.topField.getValue());
-                    changeScene();
-                    condition = true;
-                } else {
-                    showError("Session Cannot be connected!");
+                try {
+                    this.sessionId = this.clientHandler.initiateSession();
+                    if (!this.sessionId.isEmpty()) {
+                        NUMBER_OF_ROWS = Integer.parseInt(this.topField.getValue());
+                        changeScene();
+                        condition = true;
+                    } else {
+                        showError("Session Cannot be connected!");
+                    }
+                } catch (NumberFormatException ex) {
+                    showError("Error Occurred in getCompleteScene in Client: " + ex.toString());
                 }
             } else if (this.selectedStartOperation == Operation.JOIN_SESSION) {
                 this.sessionId = UUID.randomUUID().toString();
@@ -187,6 +200,8 @@ public class Client extends Application {
                             int finalI = i;
                             Platform.runLater(() -> {
                                 lobbyStatus.set("Players with Symbols");
+                                userConnectionStatus.set("All Users Connected. Room Full");
+                                label.getStyleClass().add("text-fill-green");
                                 HBox box = boxRight(person.getName(), node);
                                 playersNameSymbolAllottedGridPane.add(box, 0, finalI);
 
@@ -197,22 +212,33 @@ public class Client extends Application {
                 }).start();
             }
         });
-        this.adjustProps(ok);
+    }
 
-        VBox okButtonBox = new VBox();
-        okButtonBox.setAlignment(Pos.BOTTOM_RIGHT);
-        okButtonBox.setPadding(new Insets(30));
-        okButtonBox.getChildren().add(ok);
-        borderPane.setBottom(okButtonBox);
-
-        return new Scene(borderPane, 800, 800);
+    private Button getButtonJoinSession(BorderPane borderPane) {
+        Button joinSession = getButton("Join Session", 200, 200);
+        joinSession.setOnAction(e -> {
+            this.selectedStartOperation = Operation.JOIN_SESSION;
+            VBox mainCreateVBox = createSessionORJoinVBox(
+                    "Session ID",
+                    "Enter Session ID",
+                    "Select From Available Sessions",
+                    new String[]{"2", "3", "4", "5"},
+                    false
+            );
+            borderPane.setCenter(mainCreateVBox);
+        });
+        return joinSession;
     }
 
     private void addGraphic() {
         Object[] array = this.clientHandler.readMove();
         Node node = getNodeGraphic((Operation) array[0]);
-        Button button = (Button) this.scene.lookup("#" + ((String) (array[1])));
+        Button button = (Button) this.scene.lookup("#" + array[1]);
         Platform.runLater(() -> button.setGraphic(node));
+    }
+
+    private Object[] readIfWinner() {
+        return this.clientHandler.checkForWinner();
     }
 
     private void mainFunctionality() {
@@ -222,6 +248,18 @@ public class Client extends Application {
                 this.disableAllButtons.set(false);
             }
             this.addGraphic();
+            Object[] dataArray = this.readIfWinner();
+            boolean ifWinner = (Boolean) dataArray[0];
+            if (ifWinner) {
+                Person winnerPerson = (Person) dataArray[1];
+                showConfirmation("Player " + winnerPerson.getName() + " has won the game.");
+                return;
+            } else {
+                if (dataArray[1] instanceof String) {
+                    showConfirmation("Unfortunately game is a draw!");
+                    return;
+                }
+            }
         }
     }
 
@@ -321,11 +359,11 @@ public class Client extends Application {
         HBox hBoxZero = new HBox();
         hBoxZero.setAlignment(Pos.CENTER);
         hBoxZero.setPadding(new Insets(10));
-        Label label = new Label();
-        label.setTextFill(Color.RED);
-        label.textProperty().bindBidirectional(userConnectionStatus);
-        label.getStylesheets().add(STYLESHEET_PATH);
-        label.getStyleClass().add("font-size");
+        this.label = new Label();
+        this.label.setTextFill(Color.RED);
+        this.label.textProperty().bindBidirectional(userConnectionStatus);
+        this.label.getStylesheets().add(STYLESHEET_PATH);
+        this.label.getStyleClass().add("font-size");
 
         hBoxZero.getChildren().add(label);
         borderPane.setTop(hBoxZero);
@@ -510,7 +548,7 @@ class ClientHandler {
         showError("");
     }
 
-    public String initiateSession() {
+    public String initiateSession() throws NumberFormatException {
         this.sendObject(Operation.CREATE_SESSION);
         CreateSessionData data = new CreateSessionData(this.username, Operation.CREATE_SESSION, this.selectedValue, Integer.parseInt(this.topField));
         this.sendObject(data);
@@ -576,6 +614,10 @@ class ClientHandler {
     }
 
     public Object[] readMove() {
+        return (Object[]) this.readObject();
+    }
+
+    public Object[] checkForWinner() {
         return (Object[]) this.readObject();
     }
 }

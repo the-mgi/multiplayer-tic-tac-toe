@@ -58,6 +58,8 @@ class ServerSession implements Runnable {
     private int currentCount = 0;
     private int currentActivePlayer = 0;
     private final Operation[][] boardPositions;
+    private final int NUMBER_TOTAL_MOVES;
+    private int totalNumberOfMoves = 0;
 
     // here we can wrap these arrays and person in class but i am lazy!!
     private final ArrayList<ObjectOutputStream> objectOutputStreams = new ArrayList<>();
@@ -71,9 +73,10 @@ class ServerSession implements Runnable {
         this.objectOutputStreams.add(objectOutputStream);
         this.people.add(createSessionData.getPerson());
 
-        this.currentCount += 1;
-
         this.createSessionData = createSessionData;
+
+        this.currentCount += 1;
+        this.NUMBER_TOTAL_MOVES = (int) Math.pow(this.createSessionData.getNumberOfRows(), 2);
 
         this.boardPositions = new Operation[this.createSessionData.getNumberOfRows()][this.createSessionData.getNumberOfRows()];
     }
@@ -140,6 +143,7 @@ class ServerSession implements Runnable {
 
     private void listeningForCurrentPlayersMove() {
         String move = (String) this.readObject(this.currentActivePlayer);
+        this.totalNumberOfMoves += 1;
         String[] array = move.split("-");
         int rowValue = Integer.parseInt(array[0]);
         int colValue = Integer.parseInt(array[1]);
@@ -148,17 +152,27 @@ class ServerSession implements Runnable {
         Object[] sendData = new Object[]{this.shapes[this.currentActivePlayer], move};
         this.sendObjectToAll(sendData);
 
+        boolean result = checkWinningState(rowValue, colValue, this.shapes[this.currentActivePlayer]);
+        Object[] dataArray = new Object[]{result, result ? this.people.get(this.currentActivePlayer) : null};
+        this.sendObjectToAll(dataArray);
+
+        if (result) {
+            System.out.println("Game Ended. Winner Declared. Winner is: " + this.people.get(this.currentActivePlayer));
+            this.closeStreams();
+            return;
+        } else if (this.totalNumberOfMoves == this.NUMBER_TOTAL_MOVES) {
+            System.out.println("Game Draw");
+            Object[] gameDrawReport = new Object[]{Boolean.FALSE, "Game is a draw"};
+            this.sendObjectToAll(gameDrawReport);
+            return;
+        }
+
         if (this.currentActivePlayer == this.createSessionData.getNumberOfPlayersAllowed() - 1) {
             this.currentActivePlayer = 0;
         } else {
             this.currentActivePlayer += 1;
         }
-        boolean result = checkWinningState(rowValue, colValue, this.shapes[this.currentActivePlayer]);
-
-
         this.sendMovePermissions(this.currentActivePlayer);
-
-
     }
 
     private boolean checkWinningState(int rowValue, int columnValue, Operation operation) {
@@ -179,7 +193,7 @@ class ServerSession implements Runnable {
 
     private boolean columnCondition(int column, Operation operation) {
         for (int rowIndex = 0; rowIndex < this.createSessionData.getNumberOfRows(); rowIndex++) {
-            if (!(this.boardPositions[column][rowIndex] == operation)) {
+            if (!(this.boardPositions[rowIndex][column] == operation)) {
                 return false;
             }
         }
@@ -199,21 +213,22 @@ class ServerSession implements Runnable {
     }
 
     private boolean antiDiagonalCondition(Operation operation) {
-        for (int index = this.createSessionData.getNumberOfRows() - 1; index >= 0; index--) {
-            if (!(this.shapes[index] == operation)) {
+        for (int index = (this.createSessionData.getNumberOfRows() - 1), i = 0; index >= 0; index--, i++) {
+            if (!(this.boardPositions[i][index] == operation)) {
                 return false;
             }
         }
         return true;
     }
 
-    private void sendWinningReportToAll(int winnerIndex) {
-        for (int i = 0; i < this.createSessionData.getNumberOfPlayersAllowed(); i++) {
-            boolean winner = false;
-            if (i == winnerIndex) {
-                winner = true;
+    private void closeStreams() {
+        try {
+            for (int i = 0; i < this.objectOutputStreams.size(); i++) {
+                this.objectOutputStreams.get(i).flush();
+                this.objectInputStreams.get(i).close();
             }
-            this.sendObject(winner, this.objectOutputStreams.get(i));
+        } catch (IOException ex) {
+            System.out.println("Error Occurred in closeStreams in ServerSession: " + ex.toString());
         }
     }
 
